@@ -12,7 +12,6 @@ final class CastManager: NSObject, ObservableObject {
   @Published private(set) var isPlaying = false
   @Published private(set) var currentPosition: TimeInterval = 0
   @Published private(set) var deviceName: String?
-  @Published private(set) var discoveredDevices: [GCKDevice] = []
 
   private var remoteClient: GCKRemoteMediaClient?
   private var hasHandledTrackFinished = false
@@ -36,11 +35,8 @@ final class CastManager: NSObject, ObservableObject {
     let options = GCKCastOptions(discoveryCriteria: criteria)
     options.suspendSessionsWhenBackgrounded = false
     options.physicalVolumeButtonsWillControlDeviceVolume = true
-    options.startDiscoveryAfterFirstTapOnCastButton = false
     GCKCastContext.setSharedInstanceWith(options)
     GCKCastContext.sharedInstance().sessionManager.add(self)
-    GCKCastContext.sharedInstance().discoveryManager.add(self)
-    setupCastNotifications()
     setupSilentAudioPlayer()
   }
 
@@ -172,33 +168,6 @@ final class CastManager: NSObject, ObservableObject {
   func disconnect() {
     stopSilentAudio()
     GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
-  }
-
-  func connect(to device: GCKDevice) {
-    print("[CastManager] Connecting to: \(device.friendlyName ?? "Cast Device")")
-    GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
-  }
-
-  func refreshDiscoveredDevices() {
-    let dm = GCKCastContext.sharedInstance().discoveryManager
-    var list: [GCKDevice] = []
-    for i in 0..<dm.deviceCount {
-      list.append(dm.device(at: UInt(i)))
-    }
-    self.discoveredDevices = list
-    print("[CastManager] Discovered devices (\(list.count)): \(list.map { $0.friendlyName ?? "Unknown" })")
-  }
-
-  private func setupCastNotifications() {
-    NotificationCenter.default.addObserver(
-      forName: NSNotification.Name.gckCastStateDidChange,
-      object: GCKCastContext.sharedInstance(),
-      queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor [weak self] in
-        self?.refreshDiscoveredDevices()
-      }
-    }
   }
 
   private func handleDeviceVolumeChange(_ volume: Float, muted: Bool) {
@@ -354,13 +323,6 @@ extension CastManager: GCKRemoteMediaClientListener {
         self.currentPosition = position
         self.onPositionUpdate?(position)
       }
-    }
-  }
-}
-extension CastManager: GCKDiscoveryManagerListener {
-  nonisolated func didUpdateDeviceList() {
-    Task { @MainActor in
-      CastManager.shared.refreshDiscoveredDevices()
     }
   }
 }

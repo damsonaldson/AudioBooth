@@ -9,6 +9,7 @@ DEVELOPMENT_TEAM = 7MM2M9KD2W
 ORG_IDENTIFIER = com.damsonaldson
 
 OTHER_LDFLAGS = $(inherited) -ObjC
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks
 
 // Pull in local overrides if they exist (the ? makes the include optional)
 #include? "Local.xcconfig"
