@@ -2,13 +2,18 @@
 import GoogleCast
 import SwiftUI
 
-struct CastButton: UIViewRepresentable {
-  func makeUIView(context: Context) -> GCKUICastButton {
-    let button = GCKUICastButton(frame: CGRect(x: 0, y: 0, width: 24, height: 24))
-    button.tintColor = UIColor.label
-    return button
-  }
+struct CastButton: View {
+  @ObservedObject private var castManager = CastManager.shared
 
-  func updateUIView(_ uiView: GCKUICastButton, context: Context) {}
+  var body: some View {
+    Button(action: {
+      GCKCastContext.sharedInstance().presentCastDialog()
+    }) {
+      Image(systemName: castManager.isConnected ? "tv.and.mediabox.fill" : "tv.and.mediabox")
+        .font(.system(size: 19))
+        .foregroundStyle(castManager.isConnected ? Color.accentColor : Color.white)
+        .frame(width: 36, height: 36)
+    }
+  }
 }
 #endif

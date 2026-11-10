@@ -8,5 +8,7 @@
 DEVELOPMENT_TEAM = 7MM2M9KD2W
 ORG_IDENTIFIER = me.jgrenier
 
+OTHER_LDFLAGS = $(inherited) -ObjC
+
 // Pull in local overrides if they exist (the ? makes the include optional)
 #include? "Local.xcconfig"
