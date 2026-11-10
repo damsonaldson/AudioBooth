@@ -872,7 +872,7 @@ extension BookPlayerModel {
 
     lastSyncedTime = mediaProgress.currentTime
 
-    player.setQueue(for: session)
+    player.setQueue(for: session, autoPlay: pendingPlay ? true : nil)
     player.volume = Float(userPreferences.volumeLevel)
 
     configurePlayerComponents(player: player)
@@ -1023,7 +1023,7 @@ extension BookPlayerModel {
     let currentTimeSeconds = max(player.time, mediaProgress.currentTime)
     AppLogger.player.info("Reloading player at position: \(currentTimeSeconds)s")
 
-    player.setQueue(for: session)
+    player.setQueue(for: session, autoPlay: pendingPlay ? true : nil)
     player.volume = Float(userPreferences.volumeLevel)
 
     if pendingPlay {

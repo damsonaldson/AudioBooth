@@ -12,6 +12,7 @@ final class CastManager: NSObject, ObservableObject {
   @Published private(set) var isPlaying = false
   @Published private(set) var currentPosition: TimeInterval = 0
   @Published private(set) var deviceName: String?
+  @Published private(set) var currentStreamURL: URL?
 
   private var remoteClient: GCKRemoteMediaClient?
   private var hasHandledTrackFinished = false
@@ -119,6 +120,9 @@ final class CastManager: NSObject, ObservableObject {
     loadOptions.playPosition = startTime
     loadOptions.autoplay = autoplay
     loadOptions.playbackRate = playbackRate
+
+    currentPosition = startTime
+    currentStreamURL = streamURL
 
     let wasPlaying = isPlaying
     isPlaying = autoplay
@@ -238,6 +242,8 @@ extension CastManager: GCKSessionManagerListener {
       self.isPlaying = false
       self.deviceName = nil
       self.remoteClient = nil
+      self.currentPosition = 0
+      self.currentStreamURL = nil
       self.hasReceivedInitialVolume = false
       self.lastReportedVolume = nil
       self.lastReportedMuted = nil
@@ -256,6 +262,8 @@ extension CastManager: GCKSessionManagerListener {
       self.isPlaying = false
       self.deviceName = nil
       self.remoteClient = nil
+      self.currentPosition = 0
+      self.currentStreamURL = nil
       self.hasReceivedInitialVolume = false
       self.lastReportedVolume = nil
       self.lastReportedMuted = nil

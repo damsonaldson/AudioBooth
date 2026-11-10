@@ -153,9 +153,10 @@ final class AudioPlayer {
     #endif
   }
 
-  func setQueue(for session: PlaybackSession) {
+  func setQueue(for session: PlaybackSession, autoPlay: Bool? = nil) {
     let wasPlaying = isPlaying
-    wantsPlayback = wasPlaying
+    let shouldAutoPlay = autoPlay ?? wasPlaying
+    wantsPlayback = shouldAutoPlay
     pendingSeekTarget = nil
     resetDecodeRetry()
     self.session = session
@@ -175,11 +176,11 @@ final class AudioPlayer {
     #if canImport(GoogleCast) && !os(watchOS)
     if CastManager.shared.isConnected {
       player.removeAllItems()
-      loadCastCurrentTrack(seekTo: offset, autoPlay: wasPlaying)
+      loadCastCurrentTrack(seekTo: offset, autoPlay: shouldAutoPlay)
       return
     }
     #endif
-    loadQueue(from: trackIndex, seekTo: offset, autoPlay: wasPlaying)
+    loadQueue(from: trackIndex, seekTo: offset, autoPlay: shouldAutoPlay)
   }
 
   func pause() {
@@ -206,10 +207,14 @@ final class AudioPlayer {
     if CastManager.shared.isConnected {
       player.pause()
       if !CastManager.shared.isPlaying {
-        if CastManager.shared.currentPosition > 0 {
+        let (trackIndex, offset) = trackAndOffset(for: mediaProgress.currentTime)
+        guard tracks.indices.contains(trackIndex) else { return }
+        let track = tracks[trackIndex]
+        let expectedURL = session.remoteURL(for: track) ?? session.url(for: track)
+
+        if let expectedURL, CastManager.shared.currentStreamURL == expectedURL {
           CastManager.shared.play()
         } else {
-          let (trackIndex, offset) = trackAndOffset(for: mediaProgress.currentTime)
           currentTrackIndex = trackIndex
           loadCastCurrentTrack(seekTo: offset, autoPlay: true)
         }
