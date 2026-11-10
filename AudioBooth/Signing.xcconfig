@@ -6,7 +6,7 @@
 //               with your settings.
 
 DEVELOPMENT_TEAM = 7MM2M9KD2W
-ORG_IDENTIFIER = me.jgrenier
+ORG_IDENTIFIER = com.damsonaldson
 
 OTHER_LDFLAGS = $(inherited) -ObjC
 
