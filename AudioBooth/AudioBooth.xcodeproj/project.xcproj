@@ -314,7 +314,7 @@
         "INFOPLIST_FILE": "AudioBooth/Info.plist",
         "IPHONEOS_DEPLOYMENT_TARGET": "17.0",
         "OTHER_LDFLAGS": "$(inherited) -ObjC",
-        "PRODUCT_BUNDLE_IDENTIFIER": "$(ORG_IDENTIFIER).AudioBS",
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.damsonaldson.AudioBoothDev",
         "SUPPORTS_MACCATALYST": "YES",
         "SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD": "NO",
         "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
