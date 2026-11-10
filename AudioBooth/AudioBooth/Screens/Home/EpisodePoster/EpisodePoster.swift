@@ -201,9 +201,21 @@ extension EpisodePoster {
     let publishedAt: Date?
     let duration: Double?
     var progress: Double
-    var isPlaying = false
-    var downloadState: DownloadManager.DownloadState = .notDownloaded
-    var backgroundColor: Color?
+    var isPlaying = false {
+      willSet {
+        objectWillChange.send()
+      }
+    }
+    var downloadState: DownloadManager.DownloadState = .notDownloaded {
+      willSet {
+        objectWillChange.send()
+      }
+    }
+    var backgroundColor: Color? {
+      willSet {
+        objectWillChange.send()
+      }
+    }
     let contextMenu: PodcastEpisodeContextMenu.Model
 
     var playText: String? {

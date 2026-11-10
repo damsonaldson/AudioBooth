@@ -727,8 +727,16 @@ extension BookDetailsView {
     var coverURL: URL?
     var progress: (audio: Double, ebook: Double)
     var downloadState: DownloadManager.DownloadState
-    var isLoading: Bool
-    var isPlaying: Bool
+    var isLoading: Bool = false {
+      willSet {
+        objectWillChange.send()
+      }
+    }
+    var isPlaying: Bool = false {
+      willSet {
+        objectWillChange.send()
+      }
+    }
     var shareItems: [BookShareItem] = []
     var shareCoverImage: Image? { nil }
     var flags: Flags

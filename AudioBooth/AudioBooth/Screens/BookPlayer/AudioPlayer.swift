@@ -218,6 +218,8 @@ final class AudioPlayer {
           currentTrackIndex = trackIndex
           loadCastCurrentTrack(seekTo: offset, autoPlay: true)
         }
+      } else {
+        events.send(.stateChanged(.playing))
       }
       return
     }

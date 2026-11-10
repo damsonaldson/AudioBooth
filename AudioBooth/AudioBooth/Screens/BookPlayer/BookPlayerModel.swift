@@ -872,14 +872,17 @@ extension BookPlayerModel {
 
     lastSyncedTime = mediaProgress.currentTime
 
+    configurePlayerComponents(player: player)
+
     player.setQueue(for: session, autoPlay: pendingPlay ? true : nil)
     player.volume = Float(userPreferences.volumeLevel)
 
-    configurePlayerComponents(player: player)
-
     isLoading = false
-    if pendingPlay {
+    if pendingPlay && !player.isPlaying {
       onPlayTapped()
+    } else if pendingPlay {
+      pendingPlay = false
+      hasPlayedThisSession = true
     }
   }
 
@@ -1026,8 +1029,10 @@ extension BookPlayerModel {
     player.setQueue(for: session, autoPlay: pendingPlay ? true : nil)
     player.volume = Float(userPreferences.volumeLevel)
 
-    if pendingPlay {
+    if pendingPlay && !player.isPlaying {
       player.resume()
+      pendingPlay = false
+    } else if pendingPlay {
       pendingPlay = false
     }
 
