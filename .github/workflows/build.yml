@@ -15,6 +15,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check available Xcode versions
+        run: |
+          ls -la /Applications/ | grep -i xcode || true
+          xcodebuild -version
+
       - name: Build iOS App (Simulator)
         run: |
           xcodebuild clean build \
