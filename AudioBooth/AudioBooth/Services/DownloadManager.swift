@@ -17,10 +17,8 @@ final class DownloadManager: NSObject, ObservableObject {
   nonisolated static let sessionIdentifier = "me.jgrenier.AudioBS.download"
 
   nonisolated static let appGroupContainer: URL = {
-    guard let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
-      fatalError("App group container '\(appGroupIdentifier)' not configured")
-    }
-    return url
+    FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+      ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
   }()
 
   nonisolated static func serverDirectory(serverID: String) -> URL {
