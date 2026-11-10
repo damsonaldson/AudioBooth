@@ -309,7 +309,7 @@
           "build-phase": { "build-phase": "frameworks" },
         }, {
           "package": "google-cast-ios-sdk",
-          "product-name": "GoogleCastDynamic",
+          "product-name": "GoogleCastStatic",
           "build-phase": { "build-phase": "frameworks" },
         },
       ],
