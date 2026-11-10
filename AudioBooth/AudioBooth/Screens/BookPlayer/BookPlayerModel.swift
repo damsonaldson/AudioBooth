@@ -639,13 +639,15 @@ extension BookPlayerModel {
 }
 
 extension BookPlayerModel {
-  private func setupSession(forceTranscode: Bool) async throws {
+  private func setupSession(forceTranscode: Bool, forceRemote: Bool = false) async throws {
+    let effectiveForceRemote = forceRemote || isCasting
     item = try await sessionManager.ensureSession(
       itemID: podcastID ?? id,
       episodeID: episodeID,
       item: item,
       mediaProgress: mediaProgress,
-      forceTranscode: forceTranscode
+      forceTranscode: forceTranscode,
+      forceRemote: effectiveForceRemote
     )
 
     if let pendingSeekTime {
@@ -838,7 +840,7 @@ extension BookPlayerModel {
       guard let self else { completion(nil); return }
       Task { @MainActor in
         do {
-          _ = try await self.sessionManager.ensureSession(
+          self.item = try await self.sessionManager.ensureSession(
             itemID: self.podcastID ?? self.id,
             episodeID: self.episodeID,
             item: self.item,
@@ -850,6 +852,19 @@ extension BookPlayerModel {
         } catch {
           AppLogger.player.error("Failed to establish remote session for casting: \(error)")
           completion(nil)
+        }
+      }
+    }
+    player.onCastSessionEnded = { [weak self] in
+      guard let self else { return }
+      guard self.item?.isDownloaded == true else { return }
+      Task { @MainActor in
+        do {
+          AppLogger.player.info("Cast session ended, switching downloaded item back to local session")
+          try await self.setupSession(forceTranscode: false)
+          self.reloadPlayer()
+        } catch {
+          AppLogger.player.error("Failed to switch back to local session after cast ended: \(error)")
         }
       }
     }
@@ -989,6 +1004,14 @@ extension BookPlayerModel {
 
   private func isPlayerUsingRemoteURL() -> Bool {
     player?.isUsingRemoteURLs == true
+  }
+
+  private var isCasting: Bool {
+    #if canImport(GoogleCast) && !os(watchOS)
+    return player?.isCasting == true || CastManager.shared.isConnected
+    #else
+    return false
+    #endif
   }
 
   private func reloadPlayer() {
@@ -1238,7 +1261,7 @@ extension BookPlayerModel {
 
         self.item = updatedItem as any PlayableItem
 
-        if updatedItem.isDownloaded, self.isPlayerUsingRemoteURL() {
+        if updatedItem.isDownloaded, self.isPlayerUsingRemoteURL(), !self.isCasting {
           AppLogger.player.info("Download completed, refreshing player to use local files")
           try? await self.setupSession(forceTranscode: false)
           self.reloadPlayer()
@@ -1264,7 +1287,7 @@ extension BookPlayerModel {
 
         self.item = updatedEpisode as any PlayableItem
 
-        if updatedEpisode.isDownloaded, self.isPlayerUsingRemoteURL() {
+        if updatedEpisode.isDownloaded, self.isPlayerUsingRemoteURL(), !self.isCasting {
           AppLogger.player.info("Episode download completed, refreshing player to use local file")
           try? await self.setupSession(forceTranscode: false)
           self.reloadPlayer()

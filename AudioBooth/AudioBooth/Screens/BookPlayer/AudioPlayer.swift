@@ -48,6 +48,7 @@ final class AudioPlayer {
   let events = PassthroughSubject<Event, Never>()
 
   var onRequireRemoteSession: ((@escaping (PlaybackSession?) -> Void) -> Void)?
+  var onCastSessionEnded: (() -> Void)?
 
   var isCasting: Bool {
     #if canImport(GoogleCast) && !os(watchOS)
@@ -299,7 +300,7 @@ final class AudioPlayer {
 
     let (targetIndex, offset) = trackAndOffset(for: time)
 
-    if targetIndex == currentTrackIndex {
+    if targetIndex == currentTrackIndex, !player.items().isEmpty {
       player.seek(
         to: CMTime(seconds: offset, preferredTimescale: 1000),
         toleranceBefore: .zero,
@@ -882,6 +883,7 @@ private extension AudioPlayer {
       guard let self else { return }
       self.events.send(.stateChanged(.paused))
       self.seek(to: self.mediaProgress.currentTime)
+      self.onCastSessionEnded?()
     }
   }
 
