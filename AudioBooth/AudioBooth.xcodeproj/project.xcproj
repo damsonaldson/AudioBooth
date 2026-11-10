@@ -183,24 +183,12 @@
       "id": "3FC8DC6D2E638F5E00A4B080",
       "product": "Products/AudioBooth.app",
       "product-type": "application",
-      "dependencies": [
-        { "target": "AudioBooth Watch App", "platforms": [ "ios" ] },
-        { "target": "AudioBoothWidgetExtension", "platforms": [ "ios" ] },
-      ],
+      "dependencies": [],
       "build-phases": [
         "compile-sources",
         "frameworks",
         "resources",
         {
-          "kind": "copy",
-          "name": "Embed Watch Content",
-          "bundle-base-path": "build-products-directory",
-          "relative-path": "$(CONTENTS_FOLDER_PATH)/Watch",
-        }, {
-          "kind": "copy",
-          "name": "Embed Foundation Extensions",
-          "bundle-base-path": "plugins-directory",
-        }, {
           "kind": "script",
           "name": "Set Build Number",
           "log-environment-variables": true,
@@ -331,96 +319,6 @@
         "SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD": "NO",
         "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
         "TARGETED_DEVICE_FAMILY": "1,2,6",
-      },
-    }, {
-      "name": "AudioBooth Watch App",
-      "id": "3FBEA0642E8CD49300976BA0",
-      "product": "Products/AudioBooth Watch App.app",
-      "product-type": "application",
-      "dependencies": [
-        "AudioBoothWatchWidgetExtension",
-      ],
-      "build-phases": [
-        "compile-sources",
-        "frameworks",
-        "resources",
-        {
-          "kind": "copy",
-          "name": "Embed Foundation Extensions",
-          "bundle-base-path": "plugins-directory",
-        },
-      ],
-      "package-product-members": [
-        {
-          "product-name": "API",
-          "build-phase": { "build-phase": "frameworks" },
-        }, {
-          "product-name": "Models",
-          "build-phase": { "build-phase": "frameworks" },
-        },
-      ],
-      "build-settings": {
-        "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
-        "CLANG_ENABLE_OBJC_WEAK": "YES",
-        "CODE_SIGN_ENTITLEMENTS": "AudioBooth Watch App/AudioBooth Watch App.entitlements",
-        "ENABLE_PREVIEWS": "YES",
-        "INFOPLIST_FILE": "AudioBooth Watch App/Info.plist",
-        "PRODUCT_BUNDLE_IDENTIFIER": "$(ORG_IDENTIFIER).AudioBS.watchkitapp",
-        "SDKROOT": "watchos",
-        "SKIP_INSTALL": "YES",
-        "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
-        "TARGETED_DEVICE_FAMILY": "4",
-        "WATCHOS_DEPLOYMENT_TARGET": "10",
-      },
-    }, {
-      "name": "AudioBoothWidgetExtension",
-      "id": "3F2D3BF22EBE711800D49AFF",
-      "product": "Products/AudioBoothWidgetExtension.appex",
-      "product-type": "app-extension",
-      "build-phases": [
-        "compile-sources",
-        "frameworks",
-        "resources",
-      ],
-      "package-product-members": [
-        {
-          "product-name": "Models",
-          "build-phase": { "build-phase": "frameworks" },
-        }, {
-          "product-name": "PlayerIntents",
-          "build-phase": { "build-phase": "frameworks" },
-        },
-      ],
-      "build-settings": {
-        "ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME": "WidgetBackground",
-        "CLANG_ENABLE_OBJC_WEAK": "YES",
-        "CODE_SIGN_ENTITLEMENTS": "AudioBoothWidget/AudioBoothWidgetExtension.entitlements",
-        "INFOPLIST_FILE": "AudioBoothWidget/Info.plist",
-        "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
-        "PRODUCT_BUNDLE_IDENTIFIER": "$(ORG_IDENTIFIER).AudioBS.widget",
-        "SKIP_INSTALL": "YES",
-        "TARGETED_DEVICE_FAMILY": "1,2",
-      },
-    }, {
-      "name": "AudioBoothWatchWidgetExtension",
-      "id": "3F5A204F2F6E656C00CFD89E",
-      "product": "Products/AudioBoothWatchWidgetExtension.appex",
-      "product-type": "app-extension",
-      "build-phases": [
-        "compile-sources",
-        "frameworks",
-        "resources",
-      ],
-      "build-settings": {
-        "ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME": "WidgetBackground",
-        "CLANG_ENABLE_OBJC_WEAK": "YES",
-        "CODE_SIGN_ENTITLEMENTS": "AudioBoothWatchWidget/AudioBoothWatchWidgetExtension.entitlements",
-        "INFOPLIST_FILE": "AudioBoothWatchWidget/Info.plist",
-        "PRODUCT_BUNDLE_IDENTIFIER": "$(ORG_IDENTIFIER).AudioBS.watchkitapp.AudioBoothWatchWidget",
-        "SDKROOT": "watchos",
-        "SKIP_INSTALL": "YES",
-        "TARGETED_DEVICE_FAMILY": "4",
-        "WATCHOS_DEPLOYMENT_TARGET": "10",
       },
     },
   ],
