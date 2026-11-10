@@ -31,7 +31,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>AudioBooth</string>
 	<key>WKCompanionAppBundleIdentifier</key>
-	<string>$(ORG_IDENTIFIER).AudioBS</string>
+	<string>com.damsonaldson.AudioBoothDev</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AudioBooth needs access to your local network to connect to your Audiobookshelf server and stream audiobooks.</string>
 	<key>UIBackgroundModes</key>
