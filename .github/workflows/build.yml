@@ -1,4 +1,4 @@
-name: Build iOS App
+name: Build and Test iOS App
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build iOS App
+    name: Build and Test iOS App
     runs-on: xcode-27
 
     steps:
@@ -24,6 +24,18 @@ jobs:
             -project AudioBooth/AudioBooth.xcodeproj \
             -scheme AudioBooth \
             -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Run Unit Tests
+        run: |
+          SIM_NAME=$(xcrun simctl list devices available -j | jq -r '[.devices[] | .[] | select(.name | test("iPhone"))][0].name')
+          echo "Running tests on: $SIM_NAME"
+          xcodebuild test \
+            -project AudioBooth/AudioBooth.xcodeproj \
+            -scheme AudioBooth \
+            -destination "platform=iOS Simulator,name=$SIM_NAME" \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
