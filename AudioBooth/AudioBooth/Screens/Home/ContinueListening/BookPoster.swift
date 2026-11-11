@@ -214,16 +214,8 @@ extension BookPoster {
   @Observable
   class Model: ObservableObject, Identifiable {
     let book: BookCard.Model
-    var isPlaying = false {
-      willSet {
-        objectWillChange.send()
-      }
-    }
-    var backgroundColor: Color? {
-      willSet {
-        objectWillChange.send()
-      }
-    }
+    var isPlaying = false
+    var backgroundColor: Color?
 
     var id: String { book.id }
 

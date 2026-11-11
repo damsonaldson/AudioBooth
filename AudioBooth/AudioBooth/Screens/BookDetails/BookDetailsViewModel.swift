@@ -19,7 +19,6 @@ final class BookDetailsViewModel: BookDetailsView.Model {
   private var cancellables = Set<AnyCancellable>()
   private var progressObservation: Task<Void, Never>?
   private var itemObservation: Task<Void, Never>?
-  private var playerCancellable: AnyCancellable?
 
   private var book: Book?
   private var localBook: LocalBook?
@@ -540,18 +539,11 @@ final class BookDetailsViewModel: BookDetailsView.Model {
 
   private func observeIsPlaying(_ current: BookPlayer.Model?) {
     guard let current, current.id == bookID else {
-      playerCancellable = nil
       isPlaying = false
       return
     }
 
     updatePlayingState()
-
-    playerCancellable = current.objectWillChange
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] in
-        self?.updatePlayingState()
-      }
 
     withObservationTracking {
       _ = current.isPlaying
@@ -559,7 +551,7 @@ final class BookDetailsViewModel: BookDetailsView.Model {
       Task { @MainActor [weak self] in
         guard let self else { return }
         self.updatePlayingState()
-        self.observeIsPlaying(self.playerManager.current)
+        self.observeIsPlaying(playerManager.current)
       }
     }
   }

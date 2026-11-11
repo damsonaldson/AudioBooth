@@ -857,14 +857,17 @@ extension BookPlayerModel {
     }
     player.onCastSessionEnded = { [weak self] in
       guard let self else { return }
-      guard self.item?.isDownloaded == true else { return }
       Task { @MainActor in
-        do {
-          AppLogger.player.info("Cast session ended, switching downloaded item back to local session")
-          try await self.setupSession(forceTranscode: false)
-          self.reloadPlayer()
-        } catch {
-          AppLogger.player.error("Failed to switch back to local session after cast ended: \(error)")
+        if self.item?.isDownloaded == true {
+          do {
+            AppLogger.player.info("Cast session ended, switching downloaded item back to local session")
+            try await self.setupSession(forceTranscode: false)
+            self.reloadPlayer()
+          } catch {
+            AppLogger.player.error("Failed to switch back to local session after cast ended: \(error)")
+          }
+        } else {
+          self.player?.seek(to: self.mediaProgress.currentTime)
         }
       }
     }
@@ -878,11 +881,18 @@ extension BookPlayerModel {
     player.volume = Float(userPreferences.volumeLevel)
 
     isLoading = false
-    if pendingPlay && !player.isPlaying {
-      onPlayTapped()
-    } else if pendingPlay {
+    if pendingPlay {
       pendingPlay = false
+      if !hasPlayedThisSession, userPreferences.smartRewindOnSessionStart {
+        applySmartRewind(reason: .sessionStart)
+      }
       hasPlayedThisSession = true
+      if let timerViewModel = timer as? TimerPickerSheetViewModel {
+        timerViewModel.activateAutoTimerIfNeeded()
+      }
+      if !player.isPlaying {
+        onPlayTapped()
+      }
     }
   }
 
@@ -1029,11 +1039,18 @@ extension BookPlayerModel {
     player.setQueue(for: session, autoPlay: pendingPlay ? true : nil)
     player.volume = Float(userPreferences.volumeLevel)
 
-    if pendingPlay && !player.isPlaying {
-      player.resume()
+    if pendingPlay {
       pendingPlay = false
-    } else if pendingPlay {
-      pendingPlay = false
+      if !hasPlayedThisSession, userPreferences.smartRewindOnSessionStart {
+        applySmartRewind(reason: .sessionStart)
+      }
+      hasPlayedThisSession = true
+      if let timerViewModel = timer as? TimerPickerSheetViewModel {
+        timerViewModel.activateAutoTimerIfNeeded()
+      }
+      if !player.isPlaying {
+        player.resume()
+      }
     }
 
     AppLogger.player.info("Restored playback position and state after reload")

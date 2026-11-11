@@ -206,20 +206,20 @@ final class AudioPlayer {
     #if canImport(GoogleCast) && !os(watchOS)
     if CastManager.shared.isConnected {
       player.pause()
-      if !CastManager.shared.isPlaying {
-        let (trackIndex, offset) = trackAndOffset(for: mediaProgress.currentTime)
-        guard tracks.indices.contains(trackIndex) else { return }
-        let track = tracks[trackIndex]
-        let expectedURL = session.remoteURL(for: track) ?? session.url(for: track)
+      let (trackIndex, offset) = trackAndOffset(for: mediaProgress.currentTime)
+      guard tracks.indices.contains(trackIndex) else { return }
+      let track = tracks[trackIndex]
+      let expectedURL = session.remoteURL(for: track) ?? session.url(for: track)
 
-        if let expectedURL, CastManager.shared.currentStreamURL == expectedURL {
+      if let expectedURL, CastManager.shared.currentStreamURL == expectedURL {
+        if !CastManager.shared.isPlaying {
           CastManager.shared.play()
         } else {
-          currentTrackIndex = trackIndex
-          loadCastCurrentTrack(seekTo: offset, autoPlay: true)
+          events.send(.stateChanged(.playing))
         }
       } else {
-        events.send(.stateChanged(.playing))
+        currentTrackIndex = trackIndex
+        loadCastCurrentTrack(seekTo: offset, autoPlay: true)
       }
       return
     }
@@ -889,8 +889,11 @@ private extension AudioPlayer {
     CastManager.shared.onSessionEnded = { [weak self] in
       guard let self else { return }
       self.events.send(.stateChanged(.paused))
-      self.seek(to: self.mediaProgress.currentTime)
-      self.onCastSessionEnded?()
+      if let onCastSessionEnded = self.onCastSessionEnded {
+        onCastSessionEnded()
+      } else {
+        self.seek(to: self.mediaProgress.currentTime)
+      }
     }
   }
 

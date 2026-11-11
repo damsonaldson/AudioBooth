@@ -7,7 +7,6 @@ final class BookPosterModel: BookPoster.Model {
 
   private let playerManager = PlayerManager.shared
   private var cancellables = Set<AnyCancellable>()
-  private var playerCancellable: AnyCancellable?
 
   init(book: BookCard.Model) {
     super.init(book: book)
@@ -34,21 +33,11 @@ final class BookPosterModel: BookPoster.Model {
 
   private func observePlaybackState(_ current: BookPlayer.Model?) {
     guard let current, current.id == book.id else {
-      playerCancellable = nil
       if isPlaying { isPlaying = false }
       return
     }
 
     isPlaying = current.isPlaying
-
-    playerCancellable = current.objectWillChange
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self, weak current] in
-        guard let self, let current, current === self.playerManager.current else { return }
-        if self.isPlaying != current.isPlaying {
-          self.isPlaying = current.isPlaying
-        }
-      }
 
     withObservationTracking {
       _ = current.isPlaying

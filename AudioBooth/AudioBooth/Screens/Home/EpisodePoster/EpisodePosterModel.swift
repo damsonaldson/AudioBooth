@@ -10,7 +10,6 @@ final class EpisodePosterModel: EpisodePoster.Model {
   private let playerManager = PlayerManager.shared
   private var progressObservation: Task<Void, Never>?
   private var cancellables = Set<AnyCancellable>()
-  private var playerCancellable: AnyCancellable?
 
   init(podcast: Podcast, episode: PodcastEpisode) {
     let progress = MediaProgress.progress(for: episode.id)
@@ -115,21 +114,11 @@ final class EpisodePosterModel: EpisodePoster.Model {
 
   private func observePlaybackState(_ current: BookPlayer.Model?) {
     guard let current, current.id == id else {
-      playerCancellable = nil
       if isPlaying { isPlaying = false }
       return
     }
 
     isPlaying = current.isPlaying
-
-    playerCancellable = current.objectWillChange
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self, weak current] in
-        guard let self, let current, current === self.playerManager.current else { return }
-        if self.isPlaying != current.isPlaying {
-          self.isPlaying = current.isPlaying
-        }
-      }
 
     withObservationTracking {
       _ = current.isPlaying
