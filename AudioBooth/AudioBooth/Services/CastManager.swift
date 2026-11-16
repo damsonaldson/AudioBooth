@@ -51,7 +51,7 @@ final class CastManager: NSObject {
   private override init() {
     super.init()
     if !GCKCastContext.isSharedInstanceInitialized() {
-      let criteria = GCKCastDiscoveryCriteria(applicationID: kGCKDefaultMediaReceiverApplicationID)
+      let criteria = GCKDiscoveryCriteria(applicationID: kGCKDefaultMediaReceiverApplicationID)
       let options = GCKCastOptions(discoveryCriteria: criteria)
       options.physicalVolumeButtonsWillControlDeviceVolume = true
       GCKCastContext.setSharedInstanceWith(options)
@@ -284,7 +284,7 @@ final class CastManager: NSObject {
     data.append(Data(count: Int(dataSize)))
 
     do {
-      let player = try AVAudioPlayer(data: data, fileTypeHint: AVFileType.wav.rawValue)
+      let player = try AVAudioPlayer(data: data)
       player.numberOfLoops = -1
       player.volume = 0
       player.prepareToPlay()
@@ -298,11 +298,11 @@ final class CastManager: NSObject {
 
 extension CastManager: GCKSessionManagerListener {
   nonisolated func sessionManager(_ sessionManager: GCKSessionManager, didStart session: GCKCastSession) {
-    Task { self.handleSessionStarted(session) }
+    Task { await self.handleSessionStarted(session) }
   }
 
   nonisolated func sessionManager(_ sessionManager: GCKSessionManager, didResumeCastSession session: GCKCastSession) {
-    Task { self.handleSessionStarted(session) }
+    Task { await self.handleSessionStarted(session) }
   }
 
   nonisolated func sessionManager(
@@ -310,7 +310,7 @@ extension CastManager: GCKSessionManagerListener {
     didEnd session: GCKCastSession,
     withError error: Error?
   ) {
-    Task { self.handleSessionEnded(error: error) }
+    Task { await self.handleSessionEnded(error: error) }
   }
 
   nonisolated func sessionManager(
@@ -318,13 +318,13 @@ extension CastManager: GCKSessionManagerListener {
     didFailToStart session: GCKCastSession,
     withError error: Error
   ) {
-    Task { self.handleSessionFailed(error: error) }
+    Task { await self.handleSessionFailed(error: error) }
   }
 }
 
 extension CastManager: GCKRemoteMediaClientListener {
   nonisolated func remoteMediaClient(_ client: GCKRemoteMediaClient, didUpdate mediaStatus: GCKMediaStatus?) {
-    Task { self.handleMediaStatusUpdate(mediaStatus) }
+    Task { await self.handleMediaStatusUpdate(mediaStatus) }
   }
 }
 
@@ -340,15 +340,15 @@ private final class SeekRequestDelegate: NSObject, GCKRequestDelegate {
   }
 
   nonisolated func requestDidComplete(_ request: GCKRequest) {
-    Task { self.finish(true) }
+    Task { await self.finish(true) }
   }
 
   nonisolated func request(_ request: GCKRequest, didFailWithError error: GCKError) {
-    Task { self.finish(false) }
+    Task { await self.finish(false) }
   }
 
   nonisolated func request(_ request: GCKRequest, didAbortWith abortReason: GCKRequestAbortReason) {
-    Task { self.finish(false) }
+    Task { await self.finish(false) }
   }
 }
 
