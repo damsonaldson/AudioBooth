@@ -5,16 +5,7 @@ import Foundation
 import GoogleCast
 import Logging
 
-enum CastEvent {
-  case sessionStarted
-  case sessionEnded
-  case positionUpdated(TimeInterval)
-  case stateChanged(isPlaying: Bool)
-  case trackFinished
-  case error
-}
-
-final class CastManager: NSObject {
+final class CastManager: NSObject, CastClientProtocol {
   private static var _shared: CastManager?
 
   static var isSessionActive: Bool { _shared?.isConnected ?? false }

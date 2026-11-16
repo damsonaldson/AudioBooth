@@ -3,9 +3,35 @@ import Foundation
 import Logging
 import Models
 
-#if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-import GoogleCast
-#endif
+enum CastEvent {
+  case sessionStarted
+  case sessionEnded
+  case positionUpdated(TimeInterval)
+  case stateChanged(isPlaying: Bool)
+  case trackFinished
+  case error
+}
+
+protocol CastClientProtocol: AnyObject {
+  var isConnected: Bool { get }
+  var events: PassthroughSubject<CastEvent, Never> { get }
+  func load(
+    streamURL: URL,
+    title: String,
+    author: String?,
+    coverURL: URL?,
+    startTime: TimeInterval,
+    playbackRate: Float,
+    contentType: String,
+    autoplay: Bool
+  )
+  func play()
+  func pause()
+  func seek(to time: TimeInterval, completion: ((Bool) -> Void)?)
+  func setRate(_ rate: Float)
+  func setVolume(_ volume: Float)
+  func disconnect()
+}
 
 final class CastPlaybackController {
   enum Event {
@@ -33,14 +59,27 @@ final class CastPlaybackController {
   }
 
   var isConnected: Bool {
+    if let injectedClient {
+      return injectedClient.isConnected
+    }
     #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    CastManager.isSessionActive
+    return CastManager.isSessionActive
     #else
-    false
+    return false
     #endif
   }
 
   let events = PassthroughSubject<Event, Never>()
+
+  private let injectedClient: CastClientProtocol?
+  private var activeClient: CastClientProtocol? {
+    if let injectedClient { return injectedClient }
+    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
+    return CastManager.shared
+    #else
+    return nil
+    #endif
+  }
 
   private var pendingSeekTarget: TimeInterval?
   private var tracks: [Track] = []
@@ -52,14 +91,23 @@ final class CastPlaybackController {
   private var loadTask: Task<Void, Never>?
   private var cancellables = Set<AnyCancellable>()
 
-  init() {
-    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    CastManager.shared.events
-      .sink { [weak self] event in
-        self?.handleCastEvent(event)
-      }
-      .store(in: &cancellables)
-    #endif
+  init(client: CastClientProtocol? = nil) {
+    self.injectedClient = client
+    if let client {
+      client.events
+        .sink { [weak self] event in
+          self?.handleCastEvent(event)
+        }
+        .store(in: &cancellables)
+    } else {
+      #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
+      CastManager.shared.events
+        .sink { [weak self] event in
+          self?.handleCastEvent(event)
+        }
+        .store(in: &cancellables)
+      #endif
+    }
   }
 
   func updateContext(
@@ -140,17 +188,13 @@ final class CastPlaybackController {
   func play() {
     wantsPlayback = true
     guard loadTask == nil else { return }
-    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    CastManager.shared.play()
-    #endif
+    activeClient?.play()
   }
 
   func pause() {
     wantsPlayback = false
     loadTask?.cancel()
-    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    CastManager.shared.pause()
-    #endif
+    activeClient?.pause()
   }
 
   func stop() {
@@ -160,9 +204,7 @@ final class CastPlaybackController {
     pendingSeekTarget = nil
     reportedTime = nil
     loadTask?.cancel()
-    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    CastManager.shared.pause()
-    #endif
+    activeClient?.pause()
   }
 
   func seek(to time: TimeInterval) {
@@ -187,26 +229,20 @@ final class CastPlaybackController {
       return
     }
 
-    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    CastManager.shared.seek(to: offset) { [weak self] _ in
+    activeClient?.seek(to: offset) { [weak self] _ in
       guard let self, self.pendingSeekTarget == time else { return }
       self.pendingSeekTarget = nil
     }
-    #endif
   }
 
   func setRate(_ rate: Float) {
     playbackRate = rate
-    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    CastManager.shared.setRate(rate)
-    #endif
+    activeClient?.setRate(rate)
     events.send(.rateChanged(rate))
   }
 
   func setVolume(_ volume: Float) {
-    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    CastManager.shared.setVolume(volume)
-    #endif
+    activeClient?.setVolume(volume)
   }
 
   func currentTime(fallback: TimeInterval) -> TimeInterval {
@@ -226,8 +262,7 @@ final class CastPlaybackController {
 
 private extension CastPlaybackController {
   func castLoad(track: Track, url: URL, offset: TimeInterval, autoPlay: Bool) {
-    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    CastManager.shared.load(
+    activeClient?.load(
       streamURL: url,
       title: session?.displayTitle ?? "Audiobook",
       author: session?.displayAuthor,
@@ -237,7 +272,6 @@ private extension CastPlaybackController {
       contentType: track.mimeType ?? "audio/mpeg",
       autoplay: autoPlay
     )
-    #endif
   }
 
   func trackAndOffset(for time: TimeInterval) -> (Int, TimeInterval) {
@@ -256,7 +290,6 @@ private extension CastPlaybackController {
     return (0, 0)
   }
 
-  #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
   func handleCastEvent(_ event: CastEvent) {
     switch event {
     case .sessionStarted:
@@ -315,7 +348,7 @@ private extension CastPlaybackController {
       isPlaying = false
       isBuffering = false
       events.send(.finished)
-      CastManager.shared.disconnect()
+      activeClient?.disconnect()
       return
     }
 
@@ -331,5 +364,4 @@ private extension CastPlaybackController {
       autoPlay: true
     )
   }
-  #endif
 }
