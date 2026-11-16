@@ -1,0 +1,41 @@
+name: Build and Test iOS App
+
+on:
+  push:
+    branches: [ "test/**" ]
+
+jobs:
+  build:
+    name: Build iOS & Mac Catalyst
+    runs-on: xcode-27
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Xcode Version
+        run: xcodebuild -version
+
+      - name: Build iOS App (Simulator)
+        run: |
+          xcodebuild clean build \
+            -project AudioBooth/AudioBooth.xcodeproj \
+            -scheme AudioBooth \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Build Mac Catalyst
+        run: |
+          xcodebuild build \
+            -project AudioBooth/AudioBooth.xcodeproj \
+            -scheme AudioBooth \
+            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Run Models Package Tests
+        run: |
+          swift test --package-path Models
