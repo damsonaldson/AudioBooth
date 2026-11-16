@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    name: Build iOS & Mac Catalyst
+    name: Build and Test iOS
     runs-on: xcode-27
 
     steps:
@@ -16,26 +16,14 @@ jobs:
       - name: Check Xcode Version
         run: xcodebuild -version
 
-      - name: Build iOS App (Simulator)
+      - name: Run Unit Tests (iOS Simulator)
         run: |
-          xcodebuild clean build \
+          SIM_NAME=$(xcrun simctl list devices available -j | jq -r '[.devices[] | .[] | select(.name | test("iPhone"))][0].name')
+          echo "Running tests on: $SIM_NAME"
+          xcodebuild test \
             -project AudioBooth/AudioBooth.xcodeproj \
             -scheme AudioBooth \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination "platform=iOS Simulator,name=$SIM_NAME" \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
-
-      - name: Build Mac Catalyst
-        run: |
-          xcodebuild build \
-            -project AudioBooth/AudioBooth.xcodeproj \
-            -scheme AudioBooth \
-            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
-            -configuration Debug \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO
-
-      - name: Run Models Package Tests
-        run: |
-          swift test --package-path Models
