@@ -110,6 +110,7 @@ final class CastPlaybackController {
     }
 
     loadTask = Task { [weak self] in
+      defer { self?.loadTask = nil }
       guard let self, let remoteSession = await self.onRequireRemoteSession?(), !Task.isCancelled else {
         self?.events.send(.error(nil))
         return
@@ -138,6 +139,7 @@ final class CastPlaybackController {
 
   func play() {
     wantsPlayback = true
+    guard loadTask == nil else { return }
     #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
     CastManager.shared.play()
     #endif

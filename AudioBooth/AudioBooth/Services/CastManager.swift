@@ -206,11 +206,19 @@ final class CastManager: NSObject {
 
     switch mediaStatus.playerState {
     case .playing:
+      if positionPollTimer == nil {
+        startPositionTimer()
+      }
       if !isPlaying {
         isPlaying = true
         events.send(.stateChanged(isPlaying: true))
       }
-    case .paused, .idle:
+    case .paused:
+      if isPlaying {
+        isPlaying = false
+        events.send(.stateChanged(isPlaying: false))
+      }
+    case .idle where mediaStatus.idleReason == .cancelled && !isAwaitingLoad:
       if isPlaying {
         isPlaying = false
         events.send(.stateChanged(isPlaying: false))
