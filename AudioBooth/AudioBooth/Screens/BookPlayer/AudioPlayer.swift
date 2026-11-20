@@ -98,12 +98,7 @@ final class AudioPlayer {
 
   var volume: Float {
     get { player.volume }
-    set {
-      player.volume = newValue
-      if isCasting {
-        cast.setVolume(newValue)
-      }
-    }
+    set { player.volume = newValue }
   }
 
   var rate: Float {
