@@ -24,7 +24,6 @@ private final class MockCastClient: CastClientProtocol {
   private(set) var pauseCallCount = 0
   private(set) var seekCalls: [TimeInterval] = []
   private(set) var rateCalls: [Float] = []
-  private(set) var volumeCalls: [Float] = []
   private(set) var disconnectCallCount = 0
 
   private var pendingSeekCompletions: [(Bool) -> Void] = []
@@ -76,10 +75,6 @@ private final class MockCastClient: CastClientProtocol {
 
   func setRate(_ rate: Float) {
     rateCalls.append(rate)
-  }
-
-  func setVolume(_ volume: Float) {
-    volumeCalls.append(volume)
   }
 
   func disconnect() {
@@ -346,8 +341,8 @@ struct CastPlaybackTests {
     _ = cancellable
   }
 
-  @Test("Final trackFinished emits finished and disconnects Cast")
-  func finalTrackFinishedEmitsFinishedAndDisconnects() {
+  @Test("Final trackFinished emits finished without disconnecting Cast session")
+  func finalTrackFinishedEmitsFinishedWithoutDisconnecting() {
     let client = MockCastClient()
     let controller = CastPlaybackController(client: client)
     let tracks = makeTracks(durations: [100])
@@ -366,7 +361,7 @@ struct CastPlaybackTests {
 
     #expect(finishedCount == 1)
     #expect(controller.isPlaying == false)
-    #expect(client.disconnectCallCount == 1)
+    #expect(client.disconnectCallCount == 0)
     _ = cancellable
   }
 
@@ -419,8 +414,8 @@ struct CastPlaybackTests {
     _ = cancellable
   }
 
-  @Test("Rate and volume changes forward to Cast client")
-  func rateAndVolumeForwardToClient() {
+  @Test("Rate change forwards to Cast client")
+  func rateForwardsToClient() {
     let client = MockCastClient()
     let controller = CastPlaybackController(client: client)
 
@@ -430,22 +425,294 @@ struct CastPlaybackTests {
     }
 
     controller.setRate(1.75)
-    controller.setVolume(0.6)
 
     #expect(client.rateCalls == [1.75])
     #expect(emittedRates == [1.75])
-    #expect(client.volumeCalls == [0.6])
     _ = cancellable
   }
 
-  @Test("AudioPlayer defaults to non-Cast when no Cast session is active")
+  @Test("Cancelling remote session load via pause() does not emit error and clears buffering")
+  func loadCancellationViaPauseDoesNotEmitError() async {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks()
+    let localSession = makeSession(baseURL: nil, tracks: tracks)
+    let remoteSession = makeSession(tracks: tracks)
+
+    var states: [AudioPlayer.PlaybackState] = []
+    var sawError = false
+    let cancellable = controller.events.sink { event in
+      switch event {
+      case .stateChanged(let state): states.append(state)
+      case .error: sawError = true
+      default: break
+      }
+    }
+
+    controller.onRequireRemoteSession = {
+      try? await Task.sleep(for: .milliseconds(60))
+      return remoteSession
+    }
+
+    controller.load(session: localSession, tracks: tracks, trackIndex: 0, offset: 0, coverURL: nil, rate: 1.0, autoPlay: false)
+    controller.play()
+    #expect(controller.isBuffering == true)
+    #expect(controller.isPlaybackActive == true)
+    #expect(states.last == .buffering)
+
+    controller.pause()
+    #expect(controller.isBuffering == false)
+    #expect(controller.isPlaybackActive == false)
+    #expect(states.last == .paused)
+
+    try? await Task.sleep(for: .milliseconds(100))
+    #expect(!sawError)
+    #expect(client.loadCalls.isEmpty)
+    _ = cancellable
+  }
+
+  @Test("Superseding remote session load drops first task cleanly without error")
+  func loadCancellationViaSubsequentLoadDoesNotEmitError() async {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks()
+    let localSession = makeSession(baseURL: nil, tracks: tracks)
+    let remoteSession = makeSession(tracks: tracks)
+
+    var sawError = false
+    let cancellable = controller.events.sink { event in
+      if case .error = event { sawError = true }
+    }
+
+    var callIndex = 0
+    controller.onRequireRemoteSession = {
+      callIndex += 1
+      if callIndex == 1 {
+        try? await Task.sleep(for: .milliseconds(80))
+      } else {
+        try? await Task.sleep(for: .milliseconds(20))
+      }
+      return remoteSession
+    }
+
+    controller.load(session: localSession, tracks: tracks, trackIndex: 0, offset: 10, coverURL: nil, rate: 1.0, autoPlay: true)
+    controller.load(session: localSession, tracks: tracks, trackIndex: 1, offset: 30, coverURL: nil, rate: 1.0, autoPlay: true)
+
+    try? await Task.sleep(for: .milliseconds(120))
+    #expect(!sawError)
+    #expect(client.loadCalls.count == 1)
+    #expect(client.loadCalls[0].streamURL == URL(string: "https://abs.example.com/session/1/track/1"))
+    #expect(client.loadCalls[0].startTime == 30)
+    _ = cancellable
+  }
+
+  @Test("Seek clamps negative and past-end targets within track bounds")
+  func seekClampsOutOfRangeValues() {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100, 200])
+    let session = makeSession(tracks: tracks)
+
+    controller.load(session: session, tracks: tracks, trackIndex: 0, offset: 20, coverURL: nil, rate: 1.0, autoPlay: true)
+
+    controller.seek(to: -25)
+    #expect(controller.currentTrackIndex == 0)
+    #expect(client.seekCalls.last == 0)
+
+    controller.seek(to: 9999)
+    #expect(controller.currentTrackIndex == 1)
+    #expect(client.loadCalls.last?.startTime == 200)
+  }
+
+  @Test("isPositioned checks pendingSeekTarget and reportedTime within 1s tolerance")
+  func isPositionedRespectsTolerance() {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100])
+    let session = makeSession(tracks: tracks)
+
+    controller.load(session: session, tracks: tracks, trackIndex: 0, offset: 40, coverURL: nil, rate: 1.0, autoPlay: true)
+    #expect(controller.isPositioned(at: 40.5, fallback: 0) == true)
+    #expect(controller.isPositioned(at: 42.0, fallback: 0) == false)
+
+    controller.seek(to: 75)
+    #expect(controller.isPositioned(at: 75.8, fallback: 0) == true)
+    #expect(controller.isPositioned(at: 40.0, fallback: 0) == false)
+  }
+
+  @Test("Position updates clamp track bounds and add track startOffset")
+  func positionUpdateClampsTrackBounds() {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100, 50])
+    let session = makeSession(tracks: tracks)
+
+    var updates: [TimeInterval] = []
+    let cancellable = controller.events.sink { event in
+      if case .timeUpdate(let t) = event { updates.append(t) }
+    }
+
+    controller.load(session: session, tracks: tracks, trackIndex: 1, offset: 0, coverURL: nil, rate: 1.0, autoPlay: true)
+    client.events.send(.positionUpdated(-10))
+    client.events.send(.positionUpdated(999))
+
+    #expect(updates == [100, 150])
+    _ = cancellable
+  }
+
+  @Test("AudioPlayer sessionStarted captures wantsPlayback before pausing local player")
+  func audioPlayerSessionStartedLoadsCastWithAutoPlay() {
+    let client = MockCastClient()
+    client.isConnected = false
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100, 100])
+    let session = makeSession(tracks: tracks, currentTime: 125)
+    let mediaProgress = MediaProgress(bookID: "book-1", currentTime: 125, duration: 200)
+    let player = AudioPlayer(mediaProgress: mediaProgress, session: session, cast: controller)
+
+    player.setQueue(for: session)
+    player.resume()
+
+    client.isConnected = true
+    client.events.send(.sessionStarted)
+
+    #expect(client.loadCalls.count == 1)
+    #expect(client.loadCalls[0].streamURL == URL(string: "https://abs.example.com/session/1/track/1"))
+    #expect(client.loadCalls[0].startTime == 25)
+    #expect(client.loadCalls[0].autoplay == true)
+  }
+
+  @Test("AudioPlayer setQueue and rate changes delegate to Cast while volume stays local")
+  func audioPlayerDelegatesQueueAndRateWithoutTouchingCastVolume() {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100, 100])
+    let session = makeSession(tracks: tracks, currentTime: 110)
+    let mediaProgress = MediaProgress(bookID: "book-1", currentTime: 110, duration: 200)
+    let player = AudioPlayer(mediaProgress: mediaProgress, session: session, cast: controller)
+
+    player.setQueue(for: session)
+    player.volume = 1.0
+    player.rate = 1.5
+
+    #expect(player.isCasting == true)
+    #expect(client.loadCalls.count == 1)
+    #expect(client.loadCalls[0].startTime == 10)
+    #expect(client.rateCalls == [1.5])
+    #expect(player.volume == 1.0)
+  }
+
+  @Test("AudioPlayer stop() while casting calls cast.stop() and clears controller state")
+  func audioPlayerStopWhileCastingStopsController() {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100])
+    let session = makeSession(tracks: tracks, currentTime: 20)
+    let mediaProgress = MediaProgress(bookID: "book-1", currentTime: 20, duration: 100)
+    let player = AudioPlayer(mediaProgress: mediaProgress, session: session, cast: controller)
+
+    var stoppedEvent = false
+    let cancellable = player.events.sink { event in
+      if case .stateChanged(.stopped) = event { stoppedEvent = true }
+    }
+
+    player.setQueue(for: session)
+    client.events.send(.stateChanged(isPlaying: true))
+    #expect(player.isPlaying == true)
+
+    player.stop()
+
+    #expect(stoppedEvent)
+    #expect(client.pauseCallCount == 1)
+    #expect(controller.isPlaying == false)
+    #expect(controller.isPlaybackActive == false)
+    _ = cancellable
+  }
+
+  @Test("Switching books mid-Cast stops old player without breaking new player subscription")
+  func switchingBooksMidCastWorksCleanly() {
+    let client = MockCastClient()
+    let tracksA = makeTracks(durations: [100])
+    let sessionA = makeSession(baseURL: URL(string: "https://abs.example.com/session/A"), tracks: tracksA, currentTime: 15)
+    let progressA = MediaProgress(bookID: "book-A", currentTime: 15, duration: 100)
+    var playerA: AudioPlayer? = AudioPlayer(
+      mediaProgress: progressA,
+      session: sessionA,
+      cast: CastPlaybackController(client: client)
+    )
+    playerA?.setQueue(for: sessionA)
+    playerA?.volume = 1.0
+    playerA?.stop()
+    playerA = nil
+
+    let tracksB = makeTracks(durations: [120])
+    let sessionB = makeSession(baseURL: URL(string: "https://abs.example.com/session/B"), tracks: tracksB, currentTime: 30)
+    let progressB = MediaProgress(bookID: "book-B", currentTime: 30, duration: 120)
+    let playerB = AudioPlayer(
+      mediaProgress: progressB,
+      session: sessionB,
+      cast: CastPlaybackController(client: client)
+    )
+    playerB.setQueue(for: sessionB)
+    playerB.volume = 1.0
+    playerB.resume()
+    client.events.send(.stateChanged(isPlaying: true))
+    client.events.send(.positionUpdated(45))
+
+    #expect(client.loadCalls.count == 2)
+    #expect(client.loadCalls[1].streamURL == URL(string: "https://abs.example.com/session/B/track/0"))
+    #expect(playerB.isPlaying == true)
+    #expect(progressB.currentTime == 45)
+    #expect(progressA.currentTime == 15)
+  }
+
+  @Test("AudioPlayer sessionEnded restores local playback queue when no external handler is set")
+  func audioPlayerSessionEndedRestoresLocalQueue() {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100])
+    let session = makeSession(tracks: tracks, currentTime: 15)
+    let mediaProgress = MediaProgress(bookID: "book-1", currentTime: 15, duration: 100)
+    let player = AudioPlayer(mediaProgress: mediaProgress, session: session, cast: controller)
+
+    var states: [AudioPlayer.PlaybackState] = []
+    let cancellable = player.events.sink { event in
+      if case .stateChanged(let state) = event { states.append(state) }
+    }
+
+    player.setQueue(for: session)
+    client.isConnected = false
+    client.events.send(.sessionEnded)
+
+    #expect(player.isCasting == false)
+    #expect(states.contains(.paused))
+    _ = cancellable
+  }
+
+  @Test("Non-Cast AudioPlayer operations leave Cast client completely untouched")
   func audioPlayerNonCastDefault() {
+    let client = MockCastClient()
+    client.isConnected = false
+    let controller = CastPlaybackController(client: client)
     let tracks = makeTracks(durations: [60])
     let session = makeSession(tracks: tracks)
     let mediaProgress = MediaProgress(bookID: "book-1", currentTime: 0, duration: 60)
-    let player = AudioPlayer(mediaProgress: mediaProgress, session: session)
+    let player = AudioPlayer(mediaProgress: mediaProgress, session: session, cast: controller)
+
+    player.setQueue(for: session)
+    player.volume = 0.8
+    player.rate = 1.25
+    player.seek(to: 15)
+    player.pause()
+    player.stop()
 
     #expect(player.isCasting == false)
     #expect(player.isPlaying == false)
+    #expect(client.loadCalls.isEmpty)
+    #expect(client.playCallCount == 0)
+    #expect(client.pauseCallCount == 0)
+    #expect(client.seekCalls.isEmpty)
+    #expect(client.rateCalls.isEmpty)
+    #expect(client.disconnectCallCount == 0)
   }
 }
