@@ -256,7 +256,7 @@ final class BookPlayerModel: BookPlayer.Model {
     lastSyncedTime = mediaProgress.currentTime
     player.resume()
 
-    if userPreferences.pauseAtZeroVolume, audioSession.outputVolume == 0 {
+    if !isCasting, userPreferences.pauseAtZeroVolume, audioSession.outputVolume == 0 {
       raiseVolumeOrPause()
     }
 
@@ -567,7 +567,7 @@ extension BookPlayerModel {
 }
 
 extension BookPlayerModel {
-  private var isCasting: Bool { player?.isCasting == true }
+  private var isCasting: Bool { player?.isCasting ?? CastPlaybackController.isDefaultSessionActive }
 
   private func setupSession(forceTranscode: Bool, forceRemote: Bool = false) async throws {
     item = try await sessionManager.ensureSession(
@@ -780,10 +780,8 @@ extension BookPlayerModel {
       Task {
         if self.item?.isDownloaded == true {
           try? await self.setupSession(forceTranscode: false)
-          self.reloadPlayer()
-        } else {
-          self.player?.seek(to: self.mediaProgress.currentTime)
         }
+        self.reloadPlayer()
       }
     }
 

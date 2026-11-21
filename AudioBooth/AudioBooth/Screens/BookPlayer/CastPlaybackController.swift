@@ -29,7 +29,6 @@ protocol CastClientProtocol: AnyObject {
   func pause()
   func seek(to time: TimeInterval, completion: ((Bool) -> Void)?)
   func setRate(_ rate: Float)
-  func setVolume(_ volume: Float)
   func disconnect()
 }
 
@@ -58,27 +57,31 @@ final class CastPlaybackController {
     isPlaying || isBuffering
   }
 
-  var isConnected: Bool {
-    if let injectedClient {
-      return injectedClient.isConnected
-    }
+  static var isDefaultSessionActive: Bool {
     #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    return CastManager.isSessionActive
+    CastManager.isSessionActive
     #else
-    return false
+    false
     #endif
+  }
+
+  private static func defaultClient() -> CastClientProtocol? {
+    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
+    CastManager.shared
+    #else
+    nil
+    #endif
+  }
+
+  var isConnected: Bool {
+    injectedClient?.isConnected ?? Self.isDefaultSessionActive
   }
 
   let events = PassthroughSubject<Event, Never>()
 
   private let injectedClient: CastClientProtocol?
   private var activeClient: CastClientProtocol? {
-    if let injectedClient { return injectedClient }
-    #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-    return CastManager.shared
-    #else
-    return nil
-    #endif
+    injectedClient ?? Self.defaultClient()
   }
 
   private var pendingSeekTarget: TimeInterval?
@@ -88,26 +91,17 @@ final class CastPlaybackController {
   private var playbackRate: Float = 1.0
   private var wantsPlayback: Bool = false
   private var reportedTime: TimeInterval?
+  private var loadGeneration: UInt64 = 0
   private var loadTask: Task<Void, Never>?
   private var cancellables = Set<AnyCancellable>()
 
   init(client: CastClientProtocol? = nil) {
     self.injectedClient = client
-    if let client {
-      client.events
-        .sink { [weak self] event in
-          self?.handleCastEvent(event)
-        }
-        .store(in: &cancellables)
-    } else {
-      #if canImport(GoogleCast) && !targetEnvironment(macCatalyst) && !os(watchOS)
-      CastManager.shared.events
-        .sink { [weak self] event in
-          self?.handleCastEvent(event)
-        }
-        .store(in: &cancellables)
-      #endif
-    }
+    activeClient?.events
+      .sink { [weak self] event in
+        self?.handleCastEvent(event)
+      }
+      .store(in: &cancellables)
   }
 
   func updateContext(
@@ -135,7 +129,11 @@ final class CastPlaybackController {
     rate: Float,
     autoPlay: Bool
   ) {
+    loadGeneration &+= 1
+    let generation = loadGeneration
     loadTask?.cancel()
+    loadTask = nil
+
     self.session = session
     self.tracks = tracks
     self.currentTrackIndex = trackIndex
@@ -145,6 +143,7 @@ final class CastPlaybackController {
     self.pendingSeekTarget = nil
 
     guard tracks.indices.contains(trackIndex) else {
+      isBuffering = false
       events.send(.error(nil))
       return
     }
@@ -157,10 +156,24 @@ final class CastPlaybackController {
       return
     }
 
+    if autoPlay {
+      isBuffering = true
+    }
+
     loadTask = Task { [weak self] in
-      defer { self?.loadTask = nil }
-      guard let self, let remoteSession = await self.onRequireRemoteSession?(), !Task.isCancelled else {
-        self?.events.send(.error(nil))
+      defer {
+        if self?.loadGeneration == generation {
+          self?.loadTask = nil
+        }
+      }
+      guard let self, !Task.isCancelled, self.loadGeneration == generation else { return }
+
+      let remoteSession = await self.onRequireRemoteSession?()
+      guard !Task.isCancelled, self.loadGeneration == generation else { return }
+
+      guard let remoteSession else {
+        self.isBuffering = false
+        self.events.send(.error(nil))
         return
       }
 
@@ -172,6 +185,7 @@ final class CastPlaybackController {
 
       guard resolvedTracks.indices.contains(trackIndex),
             let url = remoteSession.remoteURL(for: resolvedTracks[trackIndex]) else {
+        self.isBuffering = false
         self.events.send(.error(nil))
         return
       }
@@ -187,14 +201,26 @@ final class CastPlaybackController {
 
   func play() {
     wantsPlayback = true
-    guard loadTask == nil else { return }
+    if loadTask != nil {
+      isBuffering = true
+      events.send(.stateChanged(.buffering))
+      return
+    }
+    isBuffering = !isPlaying
     activeClient?.play()
   }
 
   func pause() {
+    let hadPendingLoad = loadTask != nil || isBuffering
     wantsPlayback = false
+    loadGeneration &+= 1
     loadTask?.cancel()
+    loadTask = nil
+    isBuffering = false
     activeClient?.pause()
+    if hadPendingLoad && !isPlaying {
+      events.send(.stateChanged(.paused))
+    }
   }
 
   func stop() {
@@ -203,12 +229,14 @@ final class CastPlaybackController {
     isBuffering = false
     pendingSeekTarget = nil
     reportedTime = nil
+    loadGeneration &+= 1
     loadTask?.cancel()
+    loadTask = nil
     activeClient?.pause()
   }
 
   func seek(to time: TimeInterval) {
-    let (targetIndex, offset) = trackAndOffset(for: time)
+    let (targetIndex, offset) = tracks.trackAndOffset(for: time)
     pendingSeekTarget = time
     reportedTime = time
     events.send(.seek(time))
@@ -241,10 +269,6 @@ final class CastPlaybackController {
     events.send(.rateChanged(rate))
   }
 
-  func setVolume(_ volume: Float) {
-    activeClient?.setVolume(volume)
-  }
-
   func currentTime(fallback: TimeInterval) -> TimeInterval {
     if let pendingSeekTarget {
       return pendingSeekTarget
@@ -272,22 +296,6 @@ private extension CastPlaybackController {
       contentType: track.mimeType ?? "audio/mpeg",
       autoplay: autoPlay
     )
-  }
-
-  func trackAndOffset(for time: TimeInterval) -> (Int, TimeInterval) {
-    guard !tracks.isEmpty else { return (0, time) }
-
-    let totalDuration = tracks.reduce(0) { $0 + $1.duration }
-    let clampedTime = max(0, min(time, totalDuration))
-
-    for (index, track) in tracks.enumerated() {
-      let trackEnd = track.startOffset + track.duration
-      if clampedTime < trackEnd || index == tracks.count - 1 {
-        return (index, clampedTime - track.startOffset)
-      }
-    }
-
-    return (0, 0)
   }
 
   func handleCastEvent(_ event: CastEvent) {
@@ -348,7 +356,6 @@ private extension CastPlaybackController {
       isPlaying = false
       isBuffering = false
       events.send(.finished)
-      activeClient?.disconnect()
       return
     }
 

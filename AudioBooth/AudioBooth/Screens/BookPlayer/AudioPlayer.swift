@@ -30,7 +30,7 @@ final class AudioPlayer {
   private let player = AVQueuePlayer()
   private let eqContext = EQContext()
   private var eqEnabled = false
-  private let cast = CastPlaybackController()
+  private let cast: CastPlaybackController
   private let mediaProgress: MediaProgress
   private var session: PlaybackSession
   private let coverURL: URL?
@@ -124,10 +124,16 @@ final class AudioPlayer {
     }
   }
 
-  init(mediaProgress: MediaProgress, session: PlaybackSession, coverURL: URL? = nil) {
+  init(
+    mediaProgress: MediaProgress,
+    session: PlaybackSession,
+    coverURL: URL? = nil,
+    cast: CastPlaybackController = CastPlaybackController()
+  ) {
     self.mediaProgress = mediaProgress
     self.session = session
     self.coverURL = coverURL
+    self.cast = cast
     player.allowsExternalPlayback = false
     player.automaticallyWaitsToMinimizeStalling = false
     setupObservers()
@@ -245,11 +251,13 @@ final class AudioPlayer {
     pendingSeekTarget = nil
     removeTimeObserver()
     if isCasting {
-      cast.pause()
+      cast.stop()
     }
     player.pause()
     player.removeAllItems()
-    AudioSession.deactivate()
+    if !isCasting {
+      AudioSession.deactivate()
+    }
     events.send(.stateChanged(.stopped))
   }
 
@@ -370,19 +378,7 @@ private extension AudioPlayer {
   }
 
   func trackAndOffset(for time: TimeInterval) -> (Int, TimeInterval) {
-    guard !tracks.isEmpty else { return (0, time) }
-
-    let totalDuration = tracks.reduce(0) { $0 + $1.duration }
-    let clampedTime = max(0, min(time, totalDuration))
-
-    for (i, track) in tracks.enumerated() {
-      let trackEnd = track.startOffset + track.duration
-      if clampedTime < trackEnd || i == tracks.count - 1 {
-        return (i, clampedTime - track.startOffset)
-      }
-    }
-
-    return (0, 0)
+    tracks.trackAndOffset(for: time)
   }
 }
 
@@ -486,6 +482,7 @@ private extension AudioPlayer {
         case .error(let err):
           self.events.send(.error(err))
         case .sessionStarted:
+          let shouldAutoPlay = self.wantsPlayback || self.player.timeControlStatus == .playing
           self.player.pause()
           let (trackIndex, offset) = self.trackAndOffset(for: self.mediaProgress.currentTime)
           self.currentTrackIndex = trackIndex
@@ -496,12 +493,12 @@ private extension AudioPlayer {
             offset: offset,
             coverURL: self.coverURL,
             rate: self.rate > 0 ? self.rate : 1.0,
-            autoPlay: self.wantsPlayback || self.isPlaying
+            autoPlay: shouldAutoPlay
           )
         case .sessionEnded:
           self.events.send(.stateChanged(.paused))
           if self.onCastSessionEnded == nil {
-            self.seek(to: self.mediaProgress.currentTime)
+            self.setQueue(for: self.session)
           }
         case .sessionUpdated(let newSession):
           self.session = newSession
@@ -849,5 +846,23 @@ extension AVPlayerItem {
       options["AVURLAssetHTTPHeaderFieldsKey"] = headers
     }
     self.init(asset: AVURLAsset(url: url, options: options))
+  }
+}
+
+extension [Track] {
+  func trackAndOffset(for time: TimeInterval) -> (Int, TimeInterval) {
+    guard !isEmpty else { return (0, time) }
+
+    let totalDuration = reduce(0) { $0 + $1.duration }
+    let clampedTime = max(0, min(time, totalDuration))
+
+    for (index, track) in enumerated() {
+      let trackEnd = track.startOffset + track.duration
+      if clampedTime < trackEnd || index == count - 1 {
+        return (index, clampedTime - track.startOffset)
+      }
+    }
+
+    return (0, 0)
   }
 }

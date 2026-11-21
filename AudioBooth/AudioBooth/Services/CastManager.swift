@@ -26,10 +26,12 @@ final class CastManager: NSObject, CastClientProtocol {
 
   private var isAwaitingLoad = false
   private var isSeeking = false
+  private var pendingAutoPlay: Bool?
   private var hasHandledTrackFinished = false
   private var positionPollTimer: Timer?
   private var silentAudioPlayer: AVAudioPlayer?
-  private var activeSeekDelegates: [ObjectIdentifier: SeekRequestDelegate] = [:]
+  private var activeLoadRequest: (id: ObjectIdentifier, delegate: CastRequestDelegate)?
+  private var activeSeekDelegates: [ObjectIdentifier: CastRequestDelegate] = [:]
 
   private var sessionManager: GCKSessionManager {
     GCKCastContext.sharedInstance().sessionManager
@@ -44,6 +46,7 @@ final class CastManager: NSObject, CastClientProtocol {
     if !GCKCastContext.isSharedInstanceInitialized() {
       let criteria = GCKDiscoveryCriteria(applicationID: kGCKDefaultMediaReceiverApplicationID)
       let options = GCKCastOptions(discoveryCriteria: criteria)
+      options.suspendSessionsWhenBackgrounded = false
       options.physicalVolumeButtonsWillControlDeviceVolume = true
       GCKCastContext.setSharedInstanceWith(options)
     }
@@ -67,6 +70,7 @@ final class CastManager: NSObject, CastClientProtocol {
     }
 
     isAwaitingLoad = true
+    pendingAutoPlay = autoplay
     isSeeking = false
     currentPosition = startTime
     currentStreamURL = streamURL
@@ -91,14 +95,35 @@ final class CastManager: NSObject, CastClientProtocol {
     options.playPosition = startTime
     options.playbackRate = playbackRate
 
-    remoteClient.loadMedia(builder.build(), with: options)
+    let request = remoteClient.loadMedia(builder.build(), with: options)
+    let id = ObjectIdentifier(request)
+    let delegate = CastRequestDelegate { [weak self] success in
+      guard let self, self.activeLoadRequest?.id == id else { return }
+      self.activeLoadRequest = nil
+      if !success {
+        self.isAwaitingLoad = false
+        self.pendingAutoPlay = nil
+        self.events.send(.error)
+      }
+    }
+    activeLoadRequest = (id, delegate)
+    request.delegate = delegate
   }
 
   func play() {
+    if isAwaitingLoad {
+      pendingAutoPlay = true
+      return
+    }
     remoteClient?.play()
   }
 
   func pause() {
+    if isAwaitingLoad {
+      pendingAutoPlay = false
+      return
+    }
+    stopSilentAudio()
     remoteClient?.pause()
   }
 
@@ -110,15 +135,19 @@ final class CastManager: NSObject, CastClientProtocol {
     options.interval = time
 
     guard let request = remoteClient?.seek(with: options) else {
-      isSeeking = false
+      isSeeking = !activeSeekDelegates.isEmpty
       completion?(false)
       return
     }
 
     let key = ObjectIdentifier(request)
-    let delegate = SeekRequestDelegate { [weak self] success in
-      self?.activeSeekDelegates.removeValue(forKey: key)
-      self?.isSeeking = false
+    let delegate = CastRequestDelegate { [weak self] success in
+      guard let self else {
+        completion?(success)
+        return
+      }
+      self.activeSeekDelegates.removeValue(forKey: key)
+      self.isSeeking = !self.activeSeekDelegates.isEmpty
       completion?(success)
     }
     activeSeekDelegates[key] = delegate
@@ -129,10 +158,6 @@ final class CastManager: NSObject, CastClientProtocol {
     remoteClient?.setPlaybackRate(rate)
   }
 
-  func setVolume(_ volume: Float) {
-    sessionManager.currentCastSession?.setDeviceVolume(volume)
-  }
-
   func disconnect() {
     sessionManager.endSessionAndStopCasting(true)
   }
@@ -140,7 +165,6 @@ final class CastManager: NSObject, CastClientProtocol {
   private func handleSessionStarted(_ session: GCKCastSession) {
     isConnected = true
     session.remoteMediaClient?.add(self)
-    startSilentAudio()
     startPositionTimer()
     events.send(.sessionStarted)
   }
@@ -153,7 +177,9 @@ final class CastManager: NSObject, CastClientProtocol {
     isPlaying = false
     isAwaitingLoad = false
     isSeeking = false
+    pendingAutoPlay = nil
     currentStreamURL = nil
+    activeLoadRequest = nil
     activeSeekDelegates.removeAll()
     stopPositionTimer()
     stopSilentAudio()
@@ -176,6 +202,14 @@ final class CastManager: NSObject, CastClientProtocol {
         || mediaStatus.playerState == .paused
       if urlMatches || (mediaStatus.mediaInformation?.contentURL == nil && isActiveState) {
         isAwaitingLoad = false
+        if let desiredPlay = pendingAutoPlay {
+          pendingAutoPlay = nil
+          if desiredPlay, mediaStatus.playerState == .paused {
+            remoteClient?.play()
+          } else if !desiredPlay, mediaStatus.playerState == .playing {
+            remoteClient?.pause()
+          }
+        }
       }
     }
 
@@ -186,6 +220,7 @@ final class CastManager: NSObject, CastClientProtocol {
     {
       hasHandledTrackFinished = true
       isPlaying = false
+      stopSilentAudio()
       stopPositionTimer()
       events.send(.trackFinished)
       return
@@ -202,16 +237,19 @@ final class CastManager: NSObject, CastClientProtocol {
       }
       if !isPlaying {
         isPlaying = true
+        startSilentAudio()
         events.send(.stateChanged(isPlaying: true))
       }
     case .paused:
       if isPlaying {
         isPlaying = false
+        stopSilentAudio()
         events.send(.stateChanged(isPlaying: false))
       }
     case .idle where mediaStatus.idleReason == .cancelled && !isAwaitingLoad:
       if isPlaying {
         isPlaying = false
+        stopSilentAudio()
         events.send(.stateChanged(isPlaying: false))
       }
     default:
@@ -248,7 +286,7 @@ final class CastManager: NSObject, CastClientProtocol {
     AudioSession.configure()
     Task {
       await AudioSession.activate()
-      guard isConnected else { return }
+      guard isConnected, isPlaying else { return }
       if silentAudioPlayer == nil {
         silentAudioPlayer = makeSilentAudioPlayer()
       }
@@ -327,7 +365,7 @@ extension CastManager: GCKRemoteMediaClientListener {
   }
 }
 
-private final class SeekRequestDelegate: NSObject, GCKRequestDelegate {
+private final class CastRequestDelegate: NSObject, GCKRequestDelegate {
   private let onComplete: (Bool) -> Void
 
   init(onComplete: @escaping (Bool) -> Void) {
