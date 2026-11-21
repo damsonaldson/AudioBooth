@@ -341,16 +341,20 @@ struct CastPlaybackTests {
     _ = cancellable
   }
 
-  @Test("Final trackFinished emits finished without disconnecting Cast session")
+  @Test("Final trackFinished emits paused before finished without disconnecting Cast session")
   func finalTrackFinishedEmitsFinishedWithoutDisconnecting() {
     let client = MockCastClient()
     let controller = CastPlaybackController(client: client)
     let tracks = makeTracks(durations: [100])
     let session = makeSession(tracks: tracks)
 
-    var finishedCount = 0
+    var lifecycleEvents: [String] = []
     let cancellable = controller.events.sink { event in
-      if case .finished = event { finishedCount += 1 }
+      switch event {
+      case .stateChanged(.paused): lifecycleEvents.append("paused")
+      case .finished: lifecycleEvents.append("finished")
+      default: break
+      }
     }
 
     controller.load(session: session, tracks: tracks, trackIndex: 0, offset: 99, coverURL: nil, rate: 1.0, autoPlay: true)
@@ -359,7 +363,7 @@ struct CastPlaybackTests {
 
     client.events.send(.trackFinished)
 
-    #expect(finishedCount == 1)
+    #expect(lifecycleEvents == ["paused", "finished"])
     #expect(controller.isPlaying == false)
     #expect(client.disconnectCallCount == 0)
     _ = cancellable
@@ -642,6 +646,8 @@ struct CastPlaybackTests {
     )
     playerA?.setQueue(for: sessionA)
     playerA?.volume = 1.0
+    client.events.send(.stateChanged(isPlaying: true))
+    #expect(playerA?.isPlaying == true)
     playerA?.stop()
     playerA = nil
 
@@ -714,5 +720,83 @@ struct CastPlaybackTests {
     #expect(client.seekCalls.isEmpty)
     #expect(client.rateCalls.isEmpty)
     #expect(client.disconnectCallCount == 0)
+  }
+
+  @Test("Cross-track seek beyond book end clamps cleanly and never freezes position updates")
+  func crossTrackSeekBeyondEndDoesNotFreezeUpdates() {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100, 100])
+    let session = makeSession(tracks: tracks)
+
+    var updates: [TimeInterval] = []
+    let cancellable = controller.events.sink { event in
+      if case .timeUpdate(let t) = event { updates.append(t) }
+    }
+
+    controller.load(session: session, tracks: tracks, trackIndex: 0, offset: 10, coverURL: nil, rate: 1.0, autoPlay: true)
+    controller.seek(to: 9999)
+
+    #expect(controller.currentTrackIndex == 1)
+    #expect(controller.currentTime(fallback: 0) == 200)
+
+    // Receiver starts >2s earlier than 200; updates must still flow cleanly
+    client.events.send(.positionUpdated(95))
+    #expect(updates == [195])
+    #expect(controller.currentTime(fallback: 0) == 195)
+    _ = cancellable
+  }
+
+  @Test("Seeking while remote session load is in-flight supersedes loadTask without premature client.seek")
+  func seekDuringInFlightLoadSupersedesWithoutClientSeek() async {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100, 100])
+    let localSession = makeSession(baseURL: nil, tracks: tracks)
+    let remoteSession = makeSession(tracks: tracks)
+
+    var callCount = 0
+    controller.onRequireRemoteSession = {
+      callCount += 1
+      let delay = callCount == 1 ? 80 : 20
+      try? await Task.sleep(for: .milliseconds(delay))
+      return remoteSession
+    }
+
+    controller.load(session: localSession, tracks: tracks, trackIndex: 0, offset: 10, coverURL: nil, rate: 1.0, autoPlay: true)
+    controller.seek(to: 45)
+
+    #expect(client.seekCalls.isEmpty)
+    try? await Task.sleep(for: .milliseconds(120))
+
+    #expect(client.loadCalls.count == 1)
+    #expect(client.loadCalls[0].startTime == 45)
+  }
+
+  @Test("Session ended during in-flight remote session load suppresses load and error")
+  func sessionEndedDuringInFlightLoadSuppressesLoadAndError() async {
+    let client = MockCastClient()
+    let controller = CastPlaybackController(client: client)
+    let tracks = makeTracks(durations: [100])
+    let localSession = makeSession(baseURL: nil, tracks: tracks)
+    let remoteSession = makeSession(tracks: tracks)
+
+    var sawError = false
+    let cancellable = controller.events.sink { event in
+      if case .error = event { sawError = true }
+    }
+
+    controller.onRequireRemoteSession = {
+      try? await Task.sleep(for: .milliseconds(50))
+      return remoteSession
+    }
+
+    controller.load(session: localSession, tracks: tracks, trackIndex: 0, offset: 10, coverURL: nil, rate: 1.0, autoPlay: true)
+    client.events.send(.sessionEnded)
+
+    try? await Task.sleep(for: .milliseconds(90))
+    #expect(!sawError)
+    #expect(client.loadCalls.isEmpty)
+    _ = cancellable
   }
 }
