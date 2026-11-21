@@ -221,8 +221,10 @@ final class AudioPlayer {
     resumeTask = Task {
       let activated = await AudioSession.activate()
 
-      guard !Task.isCancelled, wantsPlayback else {
-        events.send(.stateChanged(isPlaying ? .playing : .paused))
+      guard !Task.isCancelled, wantsPlayback, !isCasting else {
+        if !isCasting {
+          events.send(.stateChanged(isPlaying ? .playing : .paused))
+        }
         return
       }
 
@@ -483,7 +485,9 @@ private extension AudioPlayer {
           self.events.send(.error(err))
         case .sessionStarted:
           let shouldAutoPlay = self.wantsPlayback || self.player.timeControlStatus == .playing
+          self.resumeTask?.cancel()
           self.player.pause()
+          self.player.removeAllItems()
           let (trackIndex, offset) = self.trackAndOffset(for: self.mediaProgress.currentTime)
           self.currentTrackIndex = trackIndex
           self.cast.load(
@@ -854,7 +858,7 @@ extension [Track] {
     guard !isEmpty else { return (0, time) }
 
     let totalDuration = reduce(0) { $0 + $1.duration }
-    let clampedTime = max(0, min(time, totalDuration))
+    let clampedTime = Swift.max(0, Swift.min(time, totalDuration))
 
     for (index, track) in enumerated() {
       let trackEnd = track.startOffset + track.duration

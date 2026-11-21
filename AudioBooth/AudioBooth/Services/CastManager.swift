@@ -27,6 +27,7 @@ final class CastManager: NSObject, CastClientProtocol {
   private var isAwaitingLoad = false
   private var isSeeking = false
   private var pendingAutoPlay: Bool?
+  private var pendingRate: Float?
   private var hasHandledTrackFinished = false
   private var positionPollTimer: Timer?
   private var silentAudioPlayer: AVAudioPlayer?
@@ -71,7 +72,10 @@ final class CastManager: NSObject, CastClientProtocol {
 
     isAwaitingLoad = true
     pendingAutoPlay = autoplay
+    pendingRate = nil
     isSeeking = false
+    isPlaying = false
+    stopSilentAudio()
     currentPosition = startTime
     currentStreamURL = streamURL
     hasHandledTrackFinished = false
@@ -103,6 +107,7 @@ final class CastManager: NSObject, CastClientProtocol {
       if !success {
         self.isAwaitingLoad = false
         self.pendingAutoPlay = nil
+        self.pendingRate = nil
         self.events.send(.error)
       }
     }
@@ -155,6 +160,10 @@ final class CastManager: NSObject, CastClientProtocol {
   }
 
   func setRate(_ rate: Float) {
+    if isAwaitingLoad {
+      pendingRate = rate
+      return
+    }
     remoteClient?.setPlaybackRate(rate)
   }
 
@@ -178,6 +187,7 @@ final class CastManager: NSObject, CastClientProtocol {
     isAwaitingLoad = false
     isSeeking = false
     pendingAutoPlay = nil
+    pendingRate = nil
     currentStreamURL = nil
     activeLoadRequest = nil
     activeSeekDelegates.removeAll()
@@ -188,7 +198,12 @@ final class CastManager: NSObject, CastClientProtocol {
 
   private func handleSessionFailed(error: Error) {
     AppLogger.player.error("Cast session failed to start: \(error)")
-    events.send(.error)
+    isConnected = false
+    isPlaying = false
+    isAwaitingLoad = false
+    pendingAutoPlay = nil
+    pendingRate = nil
+    activeLoadRequest = nil
   }
 
   private func handleMediaStatusUpdate(_ mediaStatus: GCKMediaStatus?) {
@@ -202,14 +217,32 @@ final class CastManager: NSObject, CastClientProtocol {
         || mediaStatus.playerState == .paused
       if urlMatches || (mediaStatus.mediaInformation?.contentURL == nil && isActiveState) {
         isAwaitingLoad = false
-        if let desiredPlay = pendingAutoPlay {
-          pendingAutoPlay = nil
-          if desiredPlay, mediaStatus.playerState == .paused {
-            remoteClient?.play()
-          } else if !desiredPlay, mediaStatus.playerState == .playing {
-            remoteClient?.pause()
-          }
+        if let rate = pendingRate {
+          pendingRate = nil
+          remoteClient?.setPlaybackRate(rate)
         }
+      }
+    }
+
+    if mediaStatus.playerState == .idle, mediaStatus.idleReason == .error {
+      isAwaitingLoad = false
+      pendingAutoPlay = nil
+      pendingRate = nil
+      isPlaying = false
+      stopSilentAudio()
+      events.send(.error)
+      return
+    }
+
+    if !isAwaitingLoad,
+       let desiredPlay = pendingAutoPlay,
+       mediaStatus.playerState == .playing || mediaStatus.playerState == .paused
+    {
+      pendingAutoPlay = nil
+      if desiredPlay, mediaStatus.playerState == .paused {
+        remoteClient?.play()
+      } else if !desiredPlay, mediaStatus.playerState == .playing {
+        remoteClient?.pause()
       }
     }
 
@@ -224,10 +257,6 @@ final class CastManager: NSObject, CastClientProtocol {
       stopPositionTimer()
       events.send(.trackFinished)
       return
-    }
-
-    if mediaStatus.playerState == .idle, mediaStatus.idleReason == .error {
-      events.send(.error)
     }
 
     switch mediaStatus.playerState {

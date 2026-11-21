@@ -237,13 +237,17 @@ final class CastPlaybackController {
 
   func seek(to time: TimeInterval) {
     let (targetIndex, offset) = tracks.trackAndOffset(for: time)
-    pendingSeekTarget = time
-    reportedTime = time
-    events.send(.seek(time))
+    let clampedTime = tracks.indices.contains(targetIndex)
+      ? tracks[targetIndex].startOffset + offset
+      : max(0, time)
+    reportedTime = clampedTime
+    events.send(.seek(clampedTime))
 
-    if targetIndex != currentTrackIndex, let session {
-      currentTrackIndex = targetIndex
-      events.send(.trackChanged(targetIndex))
+    if (targetIndex != currentTrackIndex || loadTask != nil), let session {
+      if targetIndex != currentTrackIndex {
+        currentTrackIndex = targetIndex
+        events.send(.trackChanged(targetIndex))
+      }
       load(
         session: session,
         tracks: tracks,
@@ -253,12 +257,12 @@ final class CastPlaybackController {
         rate: playbackRate,
         autoPlay: wantsPlayback
       )
-      pendingSeekTarget = time
       return
     }
 
+    pendingSeekTarget = clampedTime
     activeClient?.seek(to: offset) { [weak self] _ in
-      guard let self, self.pendingSeekTarget == time else { return }
+      guard let self, self.pendingSeekTarget == clampedTime else { return }
       self.pendingSeekTarget = nil
     }
   }
@@ -306,7 +310,9 @@ private extension CastPlaybackController {
 
     case .sessionEnded:
       AppLogger.player.info("Cast session ended")
+      loadGeneration &+= 1
       loadTask?.cancel()
+      loadTask = nil
       isPlaying = false
       isBuffering = false
       pendingSeekTarget = nil
@@ -355,6 +361,7 @@ private extension CastPlaybackController {
       wantsPlayback = false
       isPlaying = false
       isBuffering = false
+      events.send(.stateChanged(.paused))
       events.send(.finished)
       return
     }

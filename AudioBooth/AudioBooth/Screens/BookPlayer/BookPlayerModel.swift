@@ -778,9 +778,11 @@ extension BookPlayerModel {
     player.onCastSessionEnded = { [weak self] in
       guard let self else { return }
       Task {
+        guard self.playerManager.current === self, self.player != nil else { return }
         if self.item?.isDownloaded == true {
           try? await self.setupSession(forceTranscode: false)
         }
+        guard self.playerManager.current === self, self.player != nil else { return }
         self.reloadPlayer()
       }
     }
